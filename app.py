@@ -148,7 +148,7 @@ def numbers_to_words_dual(text: str):
         n = int(s)
 
         # Only split numbers > 999
-        if n <= 999:
+        if n <= 999 or n>9999:
             return num2words(n, lang="en")
 
         # Split number in half by digits
@@ -157,9 +157,9 @@ def numbers_to_words_dual(text: str):
         right = int(s[mid:])
 
         # Keep leading zeros meaningful (e.g. 1203 -> "twelve zero three")
-        right_words = " ".join(num2words(int(d), lang="en") for d in s[mid:])
+        #right_words = " ".join(num2words(int(d), lang="en") for d in s[mid:])
 
-        return f"{num2words(left, lang='en')} {right_words}"
+        return f"{num2words(left, lang='en')} {num2words(right, lang='en')}"
 
     normal_text = number_pattern.sub(normal_replace, text)
     split_text = number_pattern.sub(split_replace, text)
@@ -229,6 +229,7 @@ def infer_batch(ref_audio, ref_text, gen_text_batches, exp_name, remove_silence,
         zh_pause_punc = r"。，、；：？！"
         ref_text_len = len(ref_text.encode('utf-8')) + 3 * len(re.findall(zh_pause_punc, ref_text))
         gen_text_len = len(gen_text.encode('utf-8')) + 3 * len(re.findall(zh_pause_punc, gen_text))
+        print("SPEED:",speed)
         duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / speed)
 
         # inference
@@ -318,26 +319,7 @@ def infer_batch(ref_audio, ref_text, gen_text_batches, exp_name, remove_silence,
 
 @gpu_decorator
 def infer(ref_audio_orig, ref_text, gen_text, exp_name, remove_silence, cross_fade_duration=0.15):
-    maxTries = 5
-    tries = 0
-    results = []
-    while True:
-        (target_sample_rate, final_wave), spectrogram_path, adherenceScore = raw_infer(ref_audio_orig, ref_text, gen_text, exp_name, remove_silence, cross_fade_duration=0.15)
-        if (adherenceScore >= 0.98):
-            return (target_sample_rate, final_wave), spectrogram_path
-        results.append((target_sample_rate, final_wave, spectrogram_path, adherenceScore))
-        print("Attempt", tries, "- adherence score", adherenceScore)
-        tries+=1
-        if tries >= maxTries:
-            break
-    results.sort(key=lambda x: x[3], reverse=True)
-    print("Returning best attempt - adherence score", results[0][3])
-    gr.Info("Returning best attempt - adherence score", results[0][3])
-    return (results[0][0], results[0][1]) , results[0][2]
-
-@gpu_decorator
-def raw_infer(ref_audio_orig, ref_text, gen_text, exp_name, remove_silence, cross_fade_duration=0.15):
-
+    
     print(gen_text)
 
     gr.Info("Converting audio...")
@@ -390,8 +372,29 @@ def raw_infer(ref_audio_orig, ref_text, gen_text, exp_name, remove_silence, cros
     
     gr.Info(f"Generating audio using {exp_name} in {len(gen_text_batches)} batches")
     textv1,textv2 = numbers_to_words_dual(gen_text)
+    print("desired output textv1:",textv1)
+    print("desired output textv2:",textv2)
     
-    (target_sample_rate, final_wave), spectrogram_path = infer_batch((audio, sr), ref_text, gen_text_batches, exp_name, remove_silence)
+    maxTries = 5
+    tries = 0
+    results = []
+    while True:
+        (target_sample_rate, final_wave), spectrogram_path, adherenceScore = raw_infer(textv1,textv2,audio,sr, ref_text, gen_text_batches, exp_name, remove_silence, cross_fade_duration)
+        if (adherenceScore >= 0.98):
+            return (target_sample_rate, final_wave), spectrogram_path
+        results.append((target_sample_rate, final_wave, spectrogram_path, adherenceScore))
+        print("Attempt", tries, "- adherence score", adherenceScore)
+        tries+=1
+        if tries >= maxTries:
+            break
+    results.sort(key=lambda x: x[3], reverse=True)
+    print("Returning best attempt - adherence score", results[0][3])
+    gr.Info("Returning best attempt - adherence score", results[0][3])
+    return (results[0][0], results[0][1]) , results[0][2]
+
+@gpu_decorator
+def raw_infer(textv1,textv2,audio,sr, ref_text,gen_text_batches, exp_name, remove_silence, cross_fade_duration=0.15):
+    (target_sample_rate, final_wave), spectrogram_path = infer_batch((audio, sr), ref_text, gen_text_batches, exp_name, remove_silence, cross_fade_duration)
     result_text = pipe(
             final_wave,
             chunk_length_s=30,
